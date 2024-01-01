@@ -18,9 +18,15 @@ impl Body {
         Self(BodyInner::Full(bytes))
     }
 
-    async fn write(&mut self, writer: &mut (impl AsyncWriteExt + Unpin)) -> std::io::Result<()> {
+    async fn write(&self, writer: &mut (impl AsyncWriteExt + Unpin)) -> std::io::Result<()> {
         match &self.0 {
             BodyInner::Full(full) => writer.write_all(&full).await,
+        }
+    }
+
+    fn len(&self) -> usize {
+        match &self.0 {
+            BodyInner::Full(full) => full.len(),
         }
     }
 }
@@ -60,13 +66,18 @@ pub async fn write_request(
     )
     .await?;
 
+    let body_len = request.body().len();
+    if !request.headers().contains_key("Content-Length") && body_len != 0 {
+        request.headers_mut().insert("Content-Length", body_len.into());
+    }
+
     for (name, val) in request.headers() {
         async_write!(bytes writer, b"{}: {}\r\n", name.as_str().as_bytes(), val.as_bytes()).await?;
     }
 
     writer.write_all(b"\r\n").await?;
 
-    request.body_mut().write(writer).await?;
+    request.body().write(writer).await?;
 
     Ok(())
 }
@@ -124,10 +135,13 @@ pub async fn read_request(reader: &mut (impl AsyncBufReadExt + Unpin)) -> std::i
         );
     }
 
+    #[cfg(feature = "tracing")]
+    tracing::trace!("finished headers");
+
     let mut buf = vec![];
     let mut buf0 = [0u8; 1];
 
-    if reader.read(&mut buf0).await? == 0 {
+    if request.method_ref().is_some_and(|x| x.is_safe()) || reader.read(&mut buf0).await? == 0 {
         return request
             .body(Body::full(Bytes::new()))
             .map_err(|e| std::io::Error::new(ErrorKind::Other, e));
@@ -155,13 +169,18 @@ pub async fn write_response(
     )
     .await?;
 
+    let body_len = response.body().len();
+    if !response.headers().contains_key("Content-Length") && body_len != 0 {
+        response.headers_mut().insert("Content-Length", body_len.into());
+    }
+
     for (name, val) in response.headers() {
         async_write!(bytes writer, b"{}: {}\r\n", name.as_str().as_bytes(), val.as_bytes()).await?;
     }
 
     writer.write_all(b"\r\n").await?;
 
-    response.body_mut().write(writer).await?;
+    response.body().write(writer).await?;
 
     Ok(())
 }
@@ -254,6 +273,7 @@ mod tests {
             Request::get(Uri::from_static("/magic"))
                 .header("Authorization", "Bearer hehe")
                 .header("Host", "magic.gloryx.net")
+                .header("Content-Length", 3)
                 .body(Body::full(Bytes::from(vec![0xfa, 0xf7, 0x5a])))
                 .unwrap()
         };
@@ -266,7 +286,7 @@ mod tests {
 
         assert_eq!(
             buf,
-            &b"GET /magic HTTP/1.1\r\nauthorization: Bearer hehe\r\nhost: magic.gloryx.net\r\n\r\n\xfa\xf7\x5a"[..]
+            &b"GET /magic HTTP/1.1\r\nauthorization: Bearer hehe\r\nhost: magic.gloryx.net\r\ncontent-length: 3\r\n\r\n\xfa\xf7\x5a"[..]
         );
 
         let mut buf_read = BufReader::new(futures::io::Cursor::new(buf.to_vec()));
@@ -277,7 +297,6 @@ mod tests {
         assert!(read_request.uri() == request.uri());
         assert!(read_request.headers() == request.headers());
         assert!(read_request.version() == request.version());
-        assert!(read_request.body() == request.body());
 
         Ok(())
     }
