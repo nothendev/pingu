@@ -3,9 +3,12 @@ use std::{io::ErrorKind, str::FromStr};
 
 use bytes::Bytes;
 use futures::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
-use http::{HeaderValue, Method, Request, Response, StatusCode, Uri, Version};
+use http::{HeaderValue, Method, StatusCode, Uri, Version};
 
 pub use http;
+
+pub type Response<B = Body> = http::Response<B>;
+pub type Request<B = Body> = http::Request<B>;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Body(BodyInner);
@@ -38,7 +41,7 @@ macro_rules! async_write {
 }
 
 pub async fn write_request(
-    mut request: Request<Body>,
+    mut request: Request,
     writer: &mut (impl AsyncWriteExt + Unpin),
 ) -> std::io::Result<()> {
     // Request-Line = Method SP Request-URI SP HTTP-Version CRLF
@@ -70,7 +73,7 @@ pub async fn write_request(
 
 pub async fn read_request(
     reader: &mut (impl AsyncBufReadExt + Unpin),
-) -> std::io::Result<Request<Body>> {
+) -> std::io::Result<Request> {
     let mut request_line = String::new();
     reader.read_line(&mut request_line).await?;
 
@@ -128,7 +131,7 @@ pub async fn read_request(
 }
 
 pub async fn write_response(
-    mut response: Response<Body>,
+    mut response: Response,
     writer: &mut (impl AsyncWriteExt + Unpin),
 ) -> std::io::Result<()> {
     // StatusCode's Display impl includes the reason phrase so we don't output it ourselves
@@ -153,7 +156,7 @@ pub async fn write_response(
 
 pub async fn read_response(
     reader: &mut (impl AsyncBufReadExt + Unpin),
-) -> std::io::Result<Response<Body>> {
+) -> std::io::Result<Response> {
     let mut status_line = String::new();
     reader.read_line(&mut status_line).await?;
 
