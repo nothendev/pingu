@@ -71,9 +71,7 @@ pub async fn write_request(
     Ok(())
 }
 
-pub async fn read_request(
-    reader: &mut (impl AsyncBufReadExt + Unpin),
-) -> std::io::Result<Request> {
+pub async fn read_request(reader: &mut (impl AsyncBufReadExt + Unpin)) -> std::io::Result<Request> {
     let mut request_line = String::new();
     reader.read_line(&mut request_line).await?;
     #[cfg(feature = "tracing")]
@@ -127,6 +125,15 @@ pub async fn read_request(
     }
 
     let mut buf = vec![];
+    let mut buf0 = [0u8; 1];
+
+    if reader.read(&mut buf0).await? == 0 {
+        return request
+            .body(Body::full(Bytes::new()))
+            .map_err(|e| std::io::Error::new(ErrorKind::Other, e));
+    }
+
+    buf.push(buf0[0]);
 
     reader.read_to_end(&mut buf).await?;
 
@@ -246,6 +253,7 @@ mod tests {
         let request = || {
             Request::get(Uri::from_static("/magic"))
                 .header("Authorization", "Bearer hehe")
+                .header("Host", "magic.gloryx.net")
                 .body(Body::full(Bytes::from(vec![0xfa, 0xf7, 0x5a])))
                 .unwrap()
         };
@@ -258,7 +266,7 @@ mod tests {
 
         assert_eq!(
             buf,
-            &b"GET /magic HTTP/1.1\r\nauthorization: Bearer hehe\r\n\r\n\xfa\xf7\x5a"[..]
+            &b"GET /magic HTTP/1.1\r\nauthorization: Bearer hehe\r\nhost: magic.gloryx.net\r\n\r\n\xfa\xf7\x5a"[..]
         );
 
         let mut buf_read = BufReader::new(futures::io::Cursor::new(buf.to_vec()));
@@ -276,10 +284,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_response_and_read_response() -> std::io::Result<()> {
-        let response = || Response::builder()
-            .status(200)
-            .body(Body::full("Hello, world!".into()))
-            .unwrap();
+        let response = || {
+            Response::builder()
+                .status(200)
+                .body(Body::full("Hello, world!".into()))
+                .unwrap()
+        };
 
         let mut buffer = Vec::new();
         write_response(response(), &mut buffer).await?;
