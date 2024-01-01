@@ -76,6 +76,8 @@ pub async fn read_request(
 ) -> std::io::Result<Request> {
     let mut request_line = String::new();
     reader.read_line(&mut request_line).await?;
+    #[cfg(feature = "tracing")]
+    tracing::trace!(%request_line);
 
     fn read_request_line<'a>(
         mut line: impl Iterator<Item = &'a str>,
@@ -105,6 +107,9 @@ pub async fn read_request(
     .await?
     {
         let mut header = header_line.split(|x| *x == b':');
+
+        #[cfg(feature = "tracing")]
+        tracing::trace!(?header_line);
 
         request = request.header(
             header.next().unwrap(),
