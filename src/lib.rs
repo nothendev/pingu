@@ -5,6 +5,8 @@ use bytes::Bytes;
 use futures::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use http::{HeaderValue, Method, Request, Response, StatusCode, Uri, Version};
 
+pub use http;
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Body(BodyInner);
 
